@@ -220,8 +220,9 @@ class TransformerLSTM(torch.nn.Module):
         self.lstm1 = torch.nn.LSTM(
                 input_size=256, hidden_size=256, batch_first=True)
         self.lstm2 = torch.nn.LSTM(
-                input_size=256, hidden_size=vocab_size, batch_first=True)
+                input_size=256, hidden_size=256, batch_first=True)
         self.softmax = torch.nn.Softmax(dim=2)  # Or should it be 0? idk
+        self.linear = torch.nn.Linear(256, self.vocab_size)
 
     def forward(self, src, tgt):
         src_embed = self.embedding(src)
@@ -233,7 +234,8 @@ class TransformerLSTM(torch.nn.Module):
         lstm1_out, _ = self.lstm1(attn_out)
         # TODO What should the lstm hidden size(s) be?
         lstm2_out, _ = self.lstm2(lstm1_out)
-        return self.softmax(lstm2_out)
+        model_outputs = self.linear(lstm2_out)
+        return self.softmax(model_outputs)
     
     def train(self, src, tgt, optimizer, criterion):
         # Run teacher-forcing, compute loss, compute gradient
@@ -247,7 +249,6 @@ class TransformerLSTM(torch.nn.Module):
 
         # Run a series of forward passes
         # TODO Keep lstm hidden state <-- may not train without this
-        # FIXME Network output should be (N, C). What's in rank 1?
         for di in range(1, tgt_len):
             model_output = self.forward(src, tgt[:,:di])
             x = model_output[:,-1,:]    # Keep only last lstm output
@@ -272,12 +273,11 @@ def main():
     # TODO Batch data
     # Create model
     model = TransformerLSTM(vocab_size)
-    model.forward(train_data[0][0].unsqueeze(0), train_data[0][1].unsqueeze(0))
 
     # Train model
     print("Begin training")
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
-    criterion = torch.nn.CrossEntropyLoss()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.00001)
+    criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.1)
     
     for epoch in range(1, 20):
         for iteration in range(len(train_data)):
