@@ -278,6 +278,7 @@ def main():
     # TODO Batch data
     # Create model
     model = TransformerLSTM(vocab_size)
+    model = model.to(device)
 
     # Train model
     print("Begin training")
@@ -286,8 +287,10 @@ def main():
     
     for epoch in range(1, 20):
         for iteration in range(len(train_data)):
-            src = train_data[0][0].unsqueeze(0)
-            tgt = train_data[0][1].unsqueeze(0)
+            src = train_data[iteration][0].unsqueeze(0)
+            tgt = train_data[iteration][1].unsqueeze(0)
+            src = src.to(device)
+            tgt = tgt.to(device)
             loss = model.train(src, tgt, optimizer, criterion)
             print(loss)
 
