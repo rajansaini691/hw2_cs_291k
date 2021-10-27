@@ -15,6 +15,11 @@ OUT_DIR = "./.out/"
 TRAIN_CORPUS_PATH = "./opus.ha-en.tsv"
 VAL_CORPUS_PATH = "./newsdev2021.en-ha.xml"
 
+if torch.cuda.is_available():
+    device = torch.device("cuda")
+else:
+    device = torch.device("cpu")
+
 """
 Preprocessing helpers (normally these would be in a separate file, but I wasn't sure whether
 this was allowed for this assignment)
