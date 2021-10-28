@@ -253,7 +253,7 @@ class TransformerLSTM(torch.nn.Module):
         lstm_input = torch.cat((context, tgt_embed), 1) if lstm_hidden is None else tgt_embed
         lstm_out, hidden = self.lstm(lstm_input, lstm_hidden)
         # TODO What should the lstm hidden size(s) be?
-        skip = self.layer_norm(lstm_out + context)
+        skip = self.layer_norm(lstm_out + context + tgt_embed)
         model_outputs = self.linear(skip)
         return model_outputs[:,-1,:], hidden
 
