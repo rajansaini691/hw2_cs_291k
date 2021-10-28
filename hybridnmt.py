@@ -144,7 +144,8 @@ def create_tensors(tokenized_corpus_file, token_dict):
             sentence_lang_1, sentence_lang_2 = line.split('\t')
             tensor_lang_1 = create_tensor_from_sentence(sentence_lang_1, token_dict)
             tensor_lang_2 = create_tensor_from_sentence(sentence_lang_2, token_dict)
-            data.append((tensor_lang_1, tensor_lang_2))
+            if len(tensor_lang_1) < 40 and len(tensor_lang_2) < 40:
+                data.append((tensor_lang_1, tensor_lang_2))
         except ValueError:
             pass
     return data
@@ -234,10 +235,12 @@ class TransformerLSTM(torch.nn.Module):
                 input_size=256, hidden_size=256, num_layers=2, batch_first=True)
         self.softmax = torch.nn.Softmax(dim=2)  # Or should it be 0? idk
         self.linear = torch.nn.Linear(256, self.vocab_size)
+        self.layer_norm = torch.nn.LayerNorm(256)
 
     def forward_encoder(self, src):
         src_embed = self.embedding(src)
         encdr_hid = self.transformer1(src_embed)
+        encdr_hid = self.layer_norm(encdr_hid)
         encdr_out = self.transformer2(encdr_hid)
         return encdr_out
 
@@ -246,10 +249,11 @@ class TransformerLSTM(torch.nn.Module):
         context, _ = self.attention(query=tgt_embed, key=encdr_out, value=encdr_out, need_weights=False)
         # TODO Could try running target through another lstm, too, and then concatenating with ctx 
         # Only combine with context for first token
+        context = self.layer_norm(context)
         lstm_input = torch.cat((context, tgt_embed), 1) if lstm_hidden is None else tgt_embed
         lstm_out, hidden = self.lstm(lstm_input, lstm_hidden)
         # TODO What should the lstm hidden size(s) be?
-        skip = lstm_out + context
+        skip = self.layer_norm(lstm_out + context)
         model_outputs = self.linear(skip)
         return model_outputs[:,-1,:], hidden
 
@@ -283,6 +287,7 @@ class TransformerLSTM(torch.nn.Module):
             loss += criterion(x, y)
 
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.parameters(), 0.1)
         optimizer.step()
         return loss.item() / tgt_len
     
