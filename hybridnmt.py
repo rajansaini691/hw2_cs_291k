@@ -10,8 +10,11 @@ import numpy as np
 import xml.etree.ElementTree as ET
 import time
 import random
+import gc
 
 import torch
+from torch.profiler import profile, record_function, ProfilerActivity
+
 
 OUT_DIR = "./.out/"
 TRAIN_CORPUS_PATH = "./opus.ha-en.tsv"
@@ -21,6 +24,9 @@ if torch.cuda.is_available():
     device = torch.device("cuda")
 else:
     device = torch.device("cpu")
+
+torch.cuda.empty_cache()
+
 
 """
 Preprocessing helpers (normally these would be in a separate file, but I wasn't sure whether
@@ -224,10 +230,8 @@ class TransformerLSTM(torch.nn.Module):
                 d_model=256, nhead=8, dim_feedforward=1024, batch_first=True)
         self.attention = torch.nn.MultiheadAttention(
                 embed_dim=256, num_heads=1, batch_first=True)
-        self.lstm1 = torch.nn.LSTM(
-                input_size=256, hidden_size=256, batch_first=True)
-        self.lstm2 = torch.nn.LSTM(
-                input_size=256, hidden_size=256, batch_first=True)
+        self.lstm = torch.nn.LSTM(
+                input_size=256, hidden_size=256, num_layers=2, batch_first=True)
         self.softmax = torch.nn.Softmax(dim=2)  # Or should it be 0? idk
         self.linear = torch.nn.Linear(256, self.vocab_size)
 
@@ -237,15 +241,16 @@ class TransformerLSTM(torch.nn.Module):
         encdr_out = self.transformer2(encdr_hid)
         return encdr_out
 
-    def forward_decoder(self, lstm1_hidden, lstm2_hidden, src, tgt, encdr_out):
+    def forward_decoder(self, lstm_hidden, src, tgt, encdr_out):
         tgt_embed = self.embedding(tgt)
         context, _ = self.attention(query=tgt_embed, key=encdr_out, value=encdr_out, need_weights=False)
         # TODO Could try running target through another lstm, too, and then concatenating with ctx 
-        lstm1_out, hidden1 = self.lstm1(torch.cat((context, tgt_embed),1), lstm1_hidden)
+        # Only combine with context for first token
+        lstm_input = torch.cat((context, tgt_embed), 1) if lstm_hidden is None else tgt_embed
+        lstm_out, hidden = self.lstm(lstm_input, lstm_hidden)
         # TODO What should the lstm hidden size(s) be?
-        lstm2_out, hidden2 = self.lstm2(lstm1_out, lstm2_hidden)
-        model_outputs = self.linear(lstm2_out)
-        return model_outputs[:,-1,:], hidden1, hidden2
+        model_outputs = self.linear(lstm_out)
+        return model_outputs[:,-1,:], hidden
 
     def forward(self, src, tgt):
         src_embed = self.embedding(src)
@@ -269,10 +274,10 @@ class TransformerLSTM(torch.nn.Module):
 
         # Teacher forcing
         encdr_out = self.forward_encoder(src)
-        hidden1, hidden2 = None,None       # hidden layers for lstm
+        hidden = None           # hidden layers for lstm
         for di in range(0, tgt_len):
             tgt_token = tgt[:,di-1].unsqueeze(1)
-            x, hidden1, hidden2 = self.forward_decoder(hidden1, hidden2, src, tgt_token, encdr_out)
+            x, hidden = self.forward_decoder(hidden, src, tgt_token, encdr_out)
             y = tgt[:,di]
             loss += criterion(x, y)
 
@@ -299,7 +304,7 @@ def main():
     # Train model
     print("Begin training")
     optimizer = torch.optim.Adam(model.parameters())
-    criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.1)
+    criterion = torch.nn.CrossEntropyLoss()
     batch_size = 32
     loss = 0
 
@@ -322,6 +327,9 @@ def main():
             del src
             del tgt
             
+            if iteration % 512 == 0:
+                gc.collect()
+                torch.cuda.empty_cache()
             print(loss)
         print(loss)
 
