@@ -364,8 +364,6 @@ def main():
     with open(TRAIN_CORPUS_PATH, "r") as train_corpus_file:
         with open(VAL_CORPUS_PATH, "r") as val_corpus_file:
             train_data, val_data, vocab_size = preprocess_data(train_corpus_file, xml2tsv(val_corpus_file))
-            train_data = train_data[:20000]
-            val_data = val_data[:1000]
     print("Preprocessed and loaded dataset!")
     
     # TODO Batch data
@@ -384,7 +382,7 @@ def main():
     train_history = dict()
     val_history = dict()
 
-    for epoch in range(1, 20):
+    for epoch in range(1):
         random.shuffle(train_data)
         for iteration in range(0, len(train_data)-batch_size, batch_size):
             # Read a batch, pad it, and load it onto a GPU
