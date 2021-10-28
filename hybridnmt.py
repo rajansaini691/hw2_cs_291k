@@ -343,8 +343,10 @@ def validate(model, val_data):
     criterion = torch.nn.CrossEntropyLoss()
     total_error = 0
     for x, y in val_data:
-        x=x.unsqueeze(0)
-        y=y.unsqueeze(0)
+        x = x.unsqueeze(0)
+        y = y.unsqueeze(0)
+        x = x.to(device)
+        y = y.to(device)
         y_len = y.size(1)
         y_pred = model.forward(x, y)
         error = 0
