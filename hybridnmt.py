@@ -231,13 +231,28 @@ class TransformerLSTM(torch.nn.Module):
         self.softmax = torch.nn.Softmax(dim=2)  # Or should it be 0? idk
         self.linear = torch.nn.Linear(256, self.vocab_size)
 
+    def forward_encoder(self, src):
+        src_embed = self.embedding(src)
+        encdr_hid = self.transformer1(src_embed)
+        encdr_out = self.transformer2(encdr_hid)
+        return encdr_out
+
+    def forward_decoder(self, lstm1_hidden, lstm2_hidden, src, tgt, encdr_out):
+        tgt_embed = self.embedding(tgt)
+        context, _ = self.attention(query=tgt_embed, key=encdr_out, value=encdr_out, need_weights=False)
+        # TODO Could try running target through another lstm, too, and then concatenating with ctx 
+        lstm1_out, hidden1 = self.lstm1(torch.cat((context, tgt_embed),1), lstm1_hidden)
+        # TODO What should the lstm hidden size(s) be?
+        lstm2_out, hidden2 = self.lstm2(lstm1_out, lstm2_hidden)
+        model_outputs = self.linear(lstm2_out)
+        return model_outputs[:,-1,:], hidden1, hidden2
+
     def forward(self, src, tgt):
         src_embed = self.embedding(src)
         tgt_embed = self.embedding(tgt)
         encdr_hid = self.transformer1(src_embed)
         encdr_out = self.transformer2(encdr_hid)
         context, _ = self.attention(query=tgt_embed, key=encdr_out, value=encdr_out, need_weights=False)
-        # TODO Could try running target through another lstm, too, and then concatenating with ctx 
         lstm1_out, _ = self.lstm1(torch.cat((context, tgt_embed),1))
         # TODO What should the lstm hidden size(s) be?
         lstm2_out, _ = self.lstm2(lstm1_out)
@@ -254,8 +269,11 @@ class TransformerLSTM(torch.nn.Module):
         loss = 0
 
         # Teacher forcing
-        for di in range(1, tgt_len):
-            x = self.forward(src, tgt[:,:di])
+        encdr_out = self.forward_encoder(src)
+        hidden1, hidden2 = None,None       # hidden layers for lstm
+        for di in range(0, tgt_len):
+            tgt_token = tgt[:,di-1].unsqueeze(0)
+            x, hidden1, hidden2 = self.forward_decoder(hidden1, hidden2, src, tgt_token, encdr_out)
             y = tgt[:,di]
             loss += criterion(x, y)
 
