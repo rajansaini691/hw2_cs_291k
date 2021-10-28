@@ -8,6 +8,8 @@ from itertools import chain
 import os
 import numpy as np
 import xml.etree.ElementTree as ET
+import time
+import random
 
 import torch
 
@@ -234,35 +236,31 @@ class TransformerLSTM(torch.nn.Module):
         tgt_embed = self.embedding(tgt)
         encdr_hid = self.transformer1(src_embed)
         encdr_out = self.transformer2(encdr_hid)
-        attn_out, _ = self.attention(query=tgt_embed, key=encdr_out, value=encdr_out, need_weights=False)
-        # TODO Could try running target through another lstm, too, and then concatenating with attn_out
-        lstm1_out, _ = self.lstm1(attn_out)
+        context, _ = self.attention(query=tgt_embed, key=encdr_out, value=encdr_out, need_weights=False)
+        # TODO Could try running target through another lstm, too, and then concatenating with ctx 
+        lstm1_out, _ = self.lstm1(torch.cat((context, tgt_embed),1))
         # TODO What should the lstm hidden size(s) be?
         lstm2_out, _ = self.lstm2(lstm1_out)
         model_outputs = self.linear(lstm2_out)
-        return self.softmax(model_outputs)
+        return model_outputs[:,-1,:]
     
     def train(self, src, tgt, optimizer, criterion):
-        # Run teacher-forcing, compute loss, compute gradient
-
         optimizer.zero_grad()
 
+        print(f"src len: {src.size(1)}, tgt len: {tgt.size(1)}")
         tgt_len = tgt.size(1)
-        tgt_one_hot = torch.nn.functional.one_hot(tgt, num_classes=self.vocab_size)
-
+        if tgt_len < 2:
+            return 0
         loss = 0
 
-        # Run a series of forward passes
-        # TODO Keep lstm hidden state <-- may not train without this
+        # Teacher forcing
         for di in range(1, tgt_len):
-            model_output = self.forward(src, tgt[:,:di])
-            x = model_output[:,-1,:]    # Keep only last lstm output
+            x = self.forward(src, tgt[:,:di])
             y = tgt[:,di]
             loss += criterion(x, y)
+
         loss.backward()
-
         optimizer.step()
-
         return loss.item() / tgt_len
     
 """
@@ -273,6 +271,7 @@ def main():
     with open(TRAIN_CORPUS_PATH, "r") as train_corpus_file:
         with open(VAL_CORPUS_PATH, "r") as val_corpus_file:
             train_data, val_data, vocab_size = preprocess_data(train_corpus_file, xml2tsv(val_corpus_file))
+            train_data = train_data[:20000]
     print("Preprocessed and loaded dataset!")
     
     # TODO Batch data
@@ -282,18 +281,24 @@ def main():
 
     # Train model
     print("Begin training")
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.00001)
+    optimizer = torch.optim.Adam(model.parameters())
     criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.1)
-    
+    batch_size = 32
+    loss = 0
+
     for epoch in range(1, 20):
-        for iteration in range(len(train_data)):
+        random.shuffle(train_data)
+        for iteration in range(0, len(train_data)):
+            print(f"{iteration}/{len(train_data)}")
             src = train_data[iteration][0].unsqueeze(0)
             tgt = train_data[iteration][1].unsqueeze(0)
             src = src.to(device)
             tgt = tgt.to(device)
             loss = model.train(src, tgt, optimizer, criterion)
+            src = src.to('cpu')
+            tgt = tgt.to('cpu')
             print(loss)
-
+        print(loss)
 
 
 
