@@ -262,7 +262,6 @@ class TransformerLSTM(torch.nn.Module):
     def train(self, src, tgt, optimizer, criterion):
         optimizer.zero_grad()
 
-        print(f"src len: {src.size(1)}, tgt len: {tgt.size(1)}")
         tgt_len = tgt.size(1)
         if tgt_len < 2:
             return 0
@@ -272,7 +271,7 @@ class TransformerLSTM(torch.nn.Module):
         encdr_out = self.forward_encoder(src)
         hidden1, hidden2 = None,None       # hidden layers for lstm
         for di in range(0, tgt_len):
-            tgt_token = tgt[:,di-1].unsqueeze(0)
+            tgt_token = tgt[:,di-1].unsqueeze(1)
             x, hidden1, hidden2 = self.forward_decoder(hidden1, hidden2, src, tgt_token, encdr_out)
             y = tgt[:,di]
             loss += criterion(x, y)
@@ -306,15 +305,23 @@ def main():
 
     for epoch in range(1, 20):
         random.shuffle(train_data)
-        for iteration in range(0, len(train_data)):
+        for iteration in range(0, len(train_data)-batch_size, batch_size):
             print(f"{iteration}/{len(train_data)}")
-            src = train_data[iteration][0].unsqueeze(0)
-            tgt = train_data[iteration][1].unsqueeze(0)
+
+            # Read a batch, pad it, and load it onto a GPU
+            src = [train_data[i][0] for i in range(iteration, iteration+batch_size)]
+            tgt = [train_data[i][1] for i in range(iteration, iteration+batch_size)]
+            src = torch.nn.utils.rnn.pad_sequence(src, batch_first=True)
+            tgt = torch.nn.utils.rnn.pad_sequence(tgt, batch_first=True)
             src = src.to(device)
             tgt = tgt.to(device)
+
+            # Run one train step (compute loss, gradient update)
             loss = model.train(src, tgt, optimizer, criterion)
-            src = src.to('cpu')
-            tgt = tgt.to('cpu')
+
+            del src
+            del tgt
+            
             print(loss)
         print(loss)
 
