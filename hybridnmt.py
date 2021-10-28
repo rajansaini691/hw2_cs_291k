@@ -308,6 +308,12 @@ class TransformerLSTM(torch.nn.Module):
         lstm_out, _ = self.lstm(torch.cat((memory, tgt), 1))
         return self.linear(lstm_out[:,memory_len:,:])
 
+    def forward(self, src, tgt):
+        src_embed = self.embedding(src)
+        tgt_embed = self.embedding(tgt)
+        y_pred = self.transformer.forward(src_embed, tgt_embed)
+        return y_pred
+
     def train(self, src, tgt, optimizer, criterion):
         optimizer.zero_grad()
 
@@ -319,14 +325,34 @@ class TransformerLSTM(torch.nn.Module):
         src_embed = self.embedding(src)
         tgt_embed = self.embedding(tgt)
         y_pred = self.transformer.forward(src_embed, tgt_embed)
-        for di in range(0, tgt_len):
-            loss += criterion(y_pred[:,di,:],tgt[:,di])
+        for di in range(1, tgt_len):
+            loss += criterion(y_pred[:,di-1,:],tgt[:,di])
 
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.parameters(), 0.1)
         optimizer.step()
         return loss.item() / tgt_len
 
+"""
+Validation
+"""
+def validate(model, val_data):
+    """
+    Validate model against unseen data
+    """
+    criterion = torch.nn.CrossEntropyLoss()
+    total_error = 0
+    for x, y in val_data:
+        x=x.unsqueeze(0)
+        y=y.unsqueeze(0)
+        y_len = y.size(1)
+        y_pred = model.forward(x, y)
+        error = 0
+        for di in range(0, y_len):
+            error += criterion(y_pred[:,di-1,:],y[:,di])
+        error /= y_len
+        total_error += error
+    return (total_error / len(val_data)).item()
     
 """
 Main entrypoint
@@ -337,6 +363,7 @@ def main():
         with open(VAL_CORPUS_PATH, "r") as val_corpus_file:
             train_data, val_data, vocab_size = preprocess_data(train_corpus_file, xml2tsv(val_corpus_file))
             train_data = train_data[:20000]
+            val_data = val_data[:1000]
     print("Preprocessed and loaded dataset!")
     
     # TODO Batch data
@@ -373,7 +400,11 @@ def main():
             if iteration % 512 == 0:
                 gc.collect()
                 torch.cuda.empty_cache()
-            print(loss)
+
+            if iteration % 2048 == 0:
+                print(f"VAL - {validate(model, val_data)}")
+                print(f"TRAIN - {loss}")
+
         print(loss)
 
 
