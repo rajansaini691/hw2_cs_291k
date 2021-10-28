@@ -378,11 +378,13 @@ def main():
     batch_size = 32
     loss = 0
 
+    # Data
+    train_history = dict()
+    val_history = dict()
+
     for epoch in range(1, 20):
         random.shuffle(train_data)
         for iteration in range(0, len(train_data)-batch_size, batch_size):
-            print(f"{iteration}/{len(train_data)}")
-
             # Read a batch, pad it, and load it onto a GPU
             src = [train_data[i][0] for i in range(iteration, iteration+batch_size)]
             tgt = [train_data[i][1] for i in range(iteration, iteration+batch_size)]
@@ -402,11 +404,20 @@ def main():
                 torch.cuda.empty_cache()
 
             if iteration % 2048 == 0:
-                print(f"VAL - {validate(model, val_data)}")
+                val_loss = validate(model, val_data)
+
+                print(f"{iteration}/{len(train_data)}")
+                print(f"VAL - {val_loss}")
                 print(f"TRAIN - {loss}")
 
-        print(loss)
+                iter_since_beginning = len(train_data) * epoch + iteration
+                train_history[iter_since_beginning] = loss
+                val_history[iter_since_beginning] = val_loss
 
+        print("Train History")
+        print(train_history)
+        print("Val History")
+        print(val_history)
 
 
 if __name__ == "__main__":
