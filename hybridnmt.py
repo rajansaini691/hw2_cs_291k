@@ -304,8 +304,9 @@ class TransformerLSTM(torch.nn.Module):
         self.linear = torch.nn.Linear(256, self.vocab_size)
 
     def custom_decoder(self, tgt, memory, **kwargs):
+        memory_len = memory.size(1)
         lstm_out, _ = self.lstm(torch.cat((memory, tgt), 1))
-        return self.linear(lstm_out[:,-1,:])
+        return self.linear(lstm_out[:,memory_len:,:])
 
     def train(self, src, tgt, optimizer, criterion):
         optimizer.zero_grad()
@@ -315,19 +316,16 @@ class TransformerLSTM(torch.nn.Module):
             return 0
         loss = 0
 
-        # Teacher forcing
-        for di in range(1, tgt_len):
-            src_embed = self.embedding(src)
-            tgt_embed = self.embedding(tgt)
-            x = self.transformer.forward(src_embed, tgt_embed[:,:di,:])
-            y = tgt[:,di]
-            loss += criterion(x, y)
+        src_embed = self.embedding(src)
+        tgt_embed = self.embedding(tgt)
+        y_pred = self.transformer.forward(src_embed, tgt_embed)
+        for di in range(0, tgt_len):
+            loss += criterion(y_pred[:,di,:],tgt[:,di])
 
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.parameters(), 0.1)
         optimizer.step()
         return loss.item() / tgt_len
-
 
     
 """
