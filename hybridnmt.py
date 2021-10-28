@@ -220,9 +220,9 @@ def preprocess_data(train_tsv_file, val_tsv_file):
 Training helpers (normally these would be in a separate file, but I wasn't sure whether
 this was allowed for this assignment)
 """
-class TransformerLSTM(torch.nn.Module):
+class TransformerLSTMCustom(torch.nn.Module):
     def __init__(self, vocab_size):
-        super(TransformerLSTM, self).__init__()
+        super(TransformerLSTMCustom, self).__init__()
         self.vocab_size = int(vocab_size)
         self.embedding = torch.nn.Embedding(vocab_size, 256)
         self.transformer1 = torch.nn.TransformerEncoderLayer(
@@ -290,6 +290,45 @@ class TransformerLSTM(torch.nn.Module):
         torch.nn.utils.clip_grad_norm_(self.parameters(), 0.1)
         optimizer.step()
         return loss.item() / tgt_len
+
+class TransformerLSTM(torch.nn.Module):
+    def __init__(self, vocab_size):
+        super(TransformerLSTM, self).__init__()
+        self.vocab_size = vocab_size
+        self.embedding = torch.nn.Embedding(vocab_size, 256)
+        self.lstm = torch.nn.LSTM(
+                input_size=256, hidden_size=256, num_layers=2, batch_first=True)
+        self.transformer = torch.nn.Transformer(d_model=256, nhead=8,
+                num_encoder_layers=2, dim_feedforward=1024, num_decoder_layers=1,
+                custom_decoder=self.custom_decoder, batch_first=True)
+        self.linear = torch.nn.Linear(256, self.vocab_size)
+
+    def custom_decoder(self, tgt, memory, **kwargs):
+        lstm_out, _ = self.lstm(torch.cat((memory, tgt), 1))
+        return self.linear(lstm_out[:,-1,:])
+
+    def train(self, src, tgt, optimizer, criterion):
+        optimizer.zero_grad()
+
+        tgt_len = tgt.size(1)
+        if tgt_len < 2:
+            return 0
+        loss = 0
+
+        # Teacher forcing
+        for di in range(1, tgt_len):
+            src_embed = self.embedding(src)
+            tgt_embed = self.embedding(tgt)
+            x = self.transformer.forward(src_embed, tgt_embed[:,:di,:])
+            y = tgt[:,di]
+            loss += criterion(x, y)
+
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.parameters(), 0.1)
+        optimizer.step()
+        return loss.item() / tgt_len
+
+
     
 """
 Main entrypoint
