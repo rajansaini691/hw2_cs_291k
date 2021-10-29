@@ -302,7 +302,7 @@ class TransformerLSTM(torch.nn.Module):
                 num_encoder_layers=2, dim_feedforward=1024, num_decoder_layers=1,
                 custom_decoder=self.custom_decoder, batch_first=True)
         self.linear = torch.nn.Linear(256, self.vocab_size)
-        self.dropout = torch.nn.Dropout(p=0.4)
+        self.dropout = torch.nn.Dropout(p=0.1)
         self.layer_norm = torch.nn.LayerNorm(256)
 
     def custom_decoder(self, tgt, memory, **kwargs):
