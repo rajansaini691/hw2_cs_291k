@@ -297,16 +297,20 @@ class TransformerLSTM(torch.nn.Module):
         self.vocab_size = vocab_size
         self.embedding = torch.nn.Embedding(vocab_size, 256)
         self.lstm = torch.nn.LSTM(
-                input_size=256, hidden_size=256, num_layers=2, batch_first=True)
+                input_size=512, hidden_size=256, num_layers=2, batch_first=True)
         self.transformer = torch.nn.Transformer(d_model=256, nhead=8,
                 num_encoder_layers=2, dim_feedforward=1024, num_decoder_layers=1,
                 custom_decoder=self.custom_decoder, batch_first=True)
         self.linear = torch.nn.Linear(256, self.vocab_size)
+        self.dropout = torch.nn.Dropout(p=0.4)
+        self.layer_norm = torch.nn.LayerNorm(256)
 
     def custom_decoder(self, tgt, memory, **kwargs):
         memory_len = memory.size(1)
-        lstm_out, _ = self.lstm(torch.cat((memory, tgt), 1))
-        return self.linear(lstm_out[:,memory_len:,:])
+        lstm_out, _ = self.lstm(torch.cat((memory, tgt), 2))
+        dropout_lstm_out = self.dropout(lstm_out)
+        normalized_lstm_out = self.layer_norm(dropout_lstm_out)
+        return self.linear(normalized_lstm_out + memory)
 
     def forward(self, src, tgt):
         src_embed = self.embedding(src)
@@ -324,7 +328,9 @@ class TransformerLSTM(torch.nn.Module):
 
         src_embed = self.embedding(src)
         tgt_embed = self.embedding(tgt)
-        y_pred = self.transformer.forward(src_embed, tgt_embed)
+        src_embed_dropout = self.dropout(src_embed)
+        tgt_embed_dropout = self.dropout(tgt_embed)
+        y_pred = self.transformer.forward(src_embed_dropout, tgt_embed_dropout)
         for di in range(1, tgt_len):
             loss += criterion(y_pred[:,di-1,:],tgt[:,di])
 
@@ -373,7 +379,7 @@ def main():
 
     # Train model
     print("Begin training")
-    optimizer = torch.optim.Adam(model.parameters())
+    optimizer = torch.optim.Adam(model.parameters(), weight_decay=1e-5)     # lambda taken from paper on RNMT+
     criterion = torch.nn.CrossEntropyLoss()
     batch_size = 32
     loss = 0
