@@ -297,7 +297,7 @@ class TransformerLSTM(torch.nn.Module):
         self.vocab_size = vocab_size
         self.embedding = torch.nn.Embedding(vocab_size, 256)
         self.lstm = torch.nn.LSTM(
-                input_size=512, hidden_size=256, num_layers=2, batch_first=True)
+                input_size=256, hidden_size=256, num_layers=2, batch_first=True)
         self.transformer = torch.nn.Transformer(d_model=256, nhead=8,
                 num_encoder_layers=2, dim_feedforward=1024, num_decoder_layers=1,
                 custom_decoder=self.custom_decoder, batch_first=True)
@@ -307,10 +307,10 @@ class TransformerLSTM(torch.nn.Module):
 
     def custom_decoder(self, tgt, memory, **kwargs):
         memory_len = memory.size(1)
-        lstm_out, _ = self.lstm(torch.cat((memory, tgt), 2))
-        dropout_lstm_out = self.dropout(lstm_out)
+        lstm_out, _ = self.lstm(torch.cat((memory, tgt), 1))
+        dropout_lstm_out = self.dropout(lstm_out[:,memory_len:,:])
         normalized_lstm_out = self.layer_norm(dropout_lstm_out)
-        return self.linear(normalized_lstm_out + memory)
+        return self.linear(normalized_lstm_out + tgt)
 
     def forward(self, src, tgt):
         src_embed = self.embedding(src)
