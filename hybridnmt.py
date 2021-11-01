@@ -144,8 +144,7 @@ def create_tensors(tokenized_corpus_file, token_dict):
             sentence_lang_1, sentence_lang_2 = line.split('\t')
             tensor_lang_1 = create_tensor_from_sentence(sentence_lang_1, token_dict)
             tensor_lang_2 = create_tensor_from_sentence(sentence_lang_2, token_dict)
-            if len(tensor_lang_1) < 40 and len(tensor_lang_2) < 40:
-                data.append((tensor_lang_1, tensor_lang_2))
+            data.append((tensor_lang_1, tensor_lang_2))
         except ValueError:
             pass
     return data
@@ -335,7 +334,7 @@ class TransformerLSTM(torch.nn.Module):
             loss += criterion(y_pred[:,di-1,:],tgt[:,di])
 
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.parameters(), 0.1)
+        torch.nn.utils.clip_grad_norm_(self.parameters(), 1)
         optimizer.step()
         return loss.item() / tgt_len
 
