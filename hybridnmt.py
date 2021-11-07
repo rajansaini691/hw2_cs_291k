@@ -144,7 +144,7 @@ def create_tensors(tokenized_corpus_file, token_dict):
             sentence_lang_1, sentence_lang_2 = line.split('\t')
             tensor_lang_1 = create_tensor_from_sentence(sentence_lang_1, token_dict)
             tensor_lang_2 = create_tensor_from_sentence(sentence_lang_2, token_dict)
-            if len(sentence_lang_1) < 60 and len(sentence_lang_2) < 60:
+            if len(tensor_lang_1) < 60 and len(tensor_lang_2) < 60:
                 data.append((tensor_lang_1, tensor_lang_2))
         except ValueError:
             pass
