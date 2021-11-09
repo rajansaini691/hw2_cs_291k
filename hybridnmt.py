@@ -294,8 +294,8 @@ class TransformerLSTMCustom(torch.nn.Module):
 class TransformerLSTM(torch.nn.Module):
     def __init__(self, vocab_size):
         super(TransformerLSTM, self).__init__()
-        self.vocab_size = vocab_size
-        self.embedding = torch.nn.Embedding(vocab_size, 256)
+        self.vocab_size = vocab_size + 2        # BOS and EOS
+        self.embedding = torch.nn.Embedding(self.vocab_size, 256)
         self.lstm = torch.nn.LSTM(
                 input_size=256, hidden_size=256, num_layers=2, batch_first=True)
         self.transformer = torch.nn.Transformer(d_model=256, nhead=8,
@@ -312,7 +312,21 @@ class TransformerLSTM(torch.nn.Module):
         normalized_lstm_out = self.layer_norm(dropout_lstm_out)
         return self.linear(normalized_lstm_out + tgt)
 
+    def add_bos(self, src):
+        bos = self.vocab_size - 2     # second-to-last vocab element is BOS
+        bos = torch.tensor(bos)
+        bos = torch.tile(bos, (src.size(0), 1))
+        return torch.cat((bos, src), 1)
+
+    def add_eos(self, tgt):
+        eos = self.vocab_size - 1     # last vocab element is EOS
+        eos = torch.tensor(eos)
+        eos = torch.tile(eos, (tgt.size(0), 1))
+        return torch.cat((tgt, eos), 1)
+
     def forward(self, src, tgt):
+        tgt = self.add_bos(tgt)
+        tgt = self.add_eos(tgt)
         src_embed = self.embedding(src)
         tgt_embed = self.embedding(tgt)
         y_pred = self.transformer.forward(src_embed, tgt_embed)
@@ -326,6 +340,8 @@ class TransformerLSTM(torch.nn.Module):
             return 0
         loss = 0
 
+        tgt = self.add_bos(tgt)
+        tgt = self.add_eos(tgt)
         src_embed = self.embedding(src)
         tgt_embed = self.embedding(tgt)
         src_embed_dropout = self.dropout(src_embed)
