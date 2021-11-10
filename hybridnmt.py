@@ -10,6 +10,7 @@ import numpy as np
 import xml.etree.ElementTree as ET
 import time
 import random
+import pickle
 import gc
 
 import torch
@@ -118,6 +119,11 @@ def create_token_dict(codes_file):
         token = line.replace(' ', '').replace('\n', '')
         token_dict[token] = i + alphabet_len
 
+    # Insert special tokens
+    vocab_size = len(token_dict.keys())
+    for i, tok in enumerate(['BOS', 'EOS', 'PAD']):
+        token_dict[tok] = i + vocab_size
+
     return token_dict
     
 def create_tensor_from_sentence(sentence, token_dict):
@@ -144,7 +150,7 @@ def create_tensors(tokenized_corpus_file, token_dict):
             sentence_lang_1, sentence_lang_2 = line.split('\t')
             tensor_lang_1 = create_tensor_from_sentence(sentence_lang_1, token_dict)
             tensor_lang_2 = create_tensor_from_sentence(sentence_lang_2, token_dict)
-            if len(tensor_lang_1) < 60 and len(tensor_lang_2) < 60:
+            if len(tensor_lang_1) < 30 and len(tensor_lang_2) < 30:
                 data.append((tensor_lang_1, tensor_lang_2))
         except ValueError:
             pass
@@ -178,9 +184,9 @@ def concat_files(filea, fileb, path):
 def preprocess_data(train_tsv_file, val_tsv_file):
     # Use cached data if already computed
     if os.path.exists(OUT_DIR + "train_data") and os.path.exists(OUT_DIR + "val_data") \
-        and os.path.exists(OUT_DIR + "vocab_size.npy"):
+        and os.path.exists(OUT_DIR + "token_dict"):
         print("Loading cached train/val data...")
-        return [torch.load(OUT_DIR + "train_data"), torch.load(OUT_DIR + "val_data"), np.load(OUT_DIR + "vocab_size.npy")]
+        return [torch.load(OUT_DIR + "train_data"), torch.load(OUT_DIR + "val_data"), pickle.load(open(OUT_DIR + "token_dict", "rb"))]
 
     # Ensure file descriptors are open
     train_tsv_file = open(train_tsv_file.name, 'r')
@@ -212,19 +218,20 @@ def preprocess_data(train_tsv_file, val_tsv_file):
     # Cache tensors and vocab size
     torch.save(train_data, OUT_DIR + "train_data")
     torch.save(val_data, OUT_DIR + "val_data")
-    np.save(OUT_DIR + "vocab_size", len(token_dict))
+    pickle.dump(token_dict, open(OUT_DIR + "token_dict", "wb"))
 
-    return [train_data, val_data, len(token_dict)]
+    return [train_data, val_data, token_dict]
 
 """
 Training helpers (normally these would be in a separate file, but I wasn't sure whether
 this was allowed for this assignment)
 """
 class TransformerLSTMCustom(torch.nn.Module):
-    def __init__(self, vocab_size):
+    def __init__(self, token_dict):
         super(TransformerLSTMCustom, self).__init__()
-        self.vocab_size = int(vocab_size)
-        self.embedding = torch.nn.Embedding(vocab_size, 256)
+        self.vocab_size = len(token_dict.keys())
+        self.token_dict = token_dict
+        self.embedding = torch.nn.Embedding(self.vocab_size, 256)
         self.transformer1 = torch.nn.TransformerEncoderLayer(
                 d_model=256, nhead=8, dim_feedforward=1024, batch_first=True)
         self.transformer2 = torch.nn.TransformerEncoderLayer(
@@ -263,10 +270,9 @@ class TransformerLSTMCustom(torch.nn.Module):
         encdr_hid = self.transformer1(src_embed)
         encdr_out = self.transformer2(encdr_hid)
         context, _ = self.attention(query=tgt_embed, key=encdr_out, value=encdr_out, need_weights=False)
-        lstm1_out, _ = self.lstm1(torch.cat((context, tgt_embed),1))
+        lstm_out, _ = self.lstm(torch.cat((context, tgt_embed),1))
         # TODO What should the lstm hidden size(s) be?
-        lstm2_out, _ = self.lstm2(lstm1_out)
-        model_outputs = self.linear(lstm2_out)
+        model_outputs = self.linear(lstm_out)
         return model_outputs[:,-1,:]
     
     def train(self, src, tgt, optimizer, criterion):
@@ -292,9 +298,10 @@ class TransformerLSTMCustom(torch.nn.Module):
         return loss.item() / tgt_len
 
 class TransformerLSTM(torch.nn.Module):
-    def __init__(self, vocab_size):
+    def __init__(self, token_dict):
         super(TransformerLSTM, self).__init__()
-        self.vocab_size = vocab_size + 2        # BOS and EOS
+        self.token_dict = token_dict
+        self.vocab_size = len(token_dict.keys())
         self.embedding = torch.nn.Embedding(self.vocab_size, 256)
         self.lstm = torch.nn.LSTM(
                 input_size=256, hidden_size=256, num_layers=2, batch_first=True)
@@ -312,16 +319,16 @@ class TransformerLSTM(torch.nn.Module):
         normalized_lstm_out = self.layer_norm(dropout_lstm_out)
         return self.linear(normalized_lstm_out + tgt)
 
-    def add_bos(self, src):
-        bos = self.vocab_size - 2     # second-to-last vocab element is BOS
-        bos = torch.tensor(bos)
-        bos = torch.tile(bos, (src.size(0), 1))
-        return torch.cat((bos, src), 1)
+    def add_bos(self, tgt):
+        bos = torch.tensor(self.token_dict['BOS'])
+        bos = torch.tile(bos, (tgt.size(0), 1))
+        bos = bos.to(device)
+        return torch.cat((bos, tgt), 1)
 
     def add_eos(self, tgt):
-        eos = self.vocab_size - 1     # last vocab element is EOS
-        eos = torch.tensor(eos)
+        eos = torch.tensor(self.token_dict['EOS'])
         eos = torch.tile(eos, (tgt.size(0), 1))
+        eos = eos.to(device)
         return torch.cat((tgt, eos), 1)
 
     def forward(self, src, tgt):
@@ -351,7 +358,7 @@ class TransformerLSTM(torch.nn.Module):
             loss += criterion(y_pred[:,di-1,:],tgt[:,di])
 
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.parameters(), 1)
+        torch.nn.utils.clip_grad_norm_(self.parameters(), 0.1)
         optimizer.step()
         return loss.item() / tgt_len
 
@@ -385,12 +392,11 @@ def main():
     # Preprocess data
     with open(TRAIN_CORPUS_PATH, "r") as train_corpus_file:
         with open(VAL_CORPUS_PATH, "r") as val_corpus_file:
-            train_data, val_data, vocab_size = preprocess_data(train_corpus_file, xml2tsv(val_corpus_file))
+            train_data, val_data, token_dict = preprocess_data(train_corpus_file, xml2tsv(val_corpus_file))
     print("Preprocessed and loaded dataset!")
     
-    # TODO Batch data
     # Create model
-    model = TransformerLSTM(vocab_size)
+    model = TransformerLSTM(token_dict)
     model = model.to(device)
 
     # Train model
@@ -410,8 +416,8 @@ def main():
             # Read a batch, pad it, and load it onto a GPU
             src = [train_data[i][0] for i in range(iteration, iteration+batch_size)]
             tgt = [train_data[i][1] for i in range(iteration, iteration+batch_size)]
-            src = torch.nn.utils.rnn.pad_sequence(src, batch_first=True)
-            tgt = torch.nn.utils.rnn.pad_sequence(tgt, batch_first=True)
+            src = torch.nn.utils.rnn.pad_sequence(src, batch_first=True, padding_value=token_dict['PAD'])
+            tgt = torch.nn.utils.rnn.pad_sequence(tgt, batch_first=True, padding_value=token_dict['PAD'])
             src = src.to(device)
             tgt = tgt.to(device)
 
