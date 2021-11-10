@@ -130,12 +130,13 @@ def create_tensor_from_sentence(sentence, token_dict):
     sentence_with_boundary_tokens = list(map(\
         lambda token: token[:-2] if token.endswith("@@") else token + "</w>",
         sentence.replace('\n', '').split(' ')))
-    sentence_as_indices = []
+    sentence_as_indices = [token_dict['BOS']]
     for token in sentence_with_boundary_tokens:
         try:
             sentence_as_indices += [token_dict[token]]
         except KeyError as e:
             pass
+    sentence_as_indices += [token_dict['EOS']]
     return torch.tensor(sentence_as_indices, dtype=torch.long)
 
 def create_tensors(tokenized_corpus_file, token_dict):
@@ -319,21 +320,7 @@ class TransformerLSTM(torch.nn.Module):
         normalized_lstm_out = self.layer_norm(dropout_lstm_out)
         return self.linear(normalized_lstm_out + tgt)
 
-    def add_bos(self, tgt):
-        bos = torch.tensor(self.token_dict['BOS'])
-        bos = torch.tile(bos, (tgt.size(0), 1))
-        bos = bos.to(device)
-        return torch.cat((bos, tgt), 1)
-
-    def add_eos(self, tgt):
-        eos = torch.tensor(self.token_dict['EOS'])
-        eos = torch.tile(eos, (tgt.size(0), 1))
-        eos = eos.to(device)
-        return torch.cat((tgt, eos), 1)
-
     def forward(self, src, tgt):
-        tgt = self.add_bos(tgt)
-        tgt = self.add_eos(tgt)
         src_embed = self.embedding(src)
         tgt_embed = self.embedding(tgt)
         y_pred = self.transformer.forward(src_embed, tgt_embed)
@@ -347,8 +334,6 @@ class TransformerLSTM(torch.nn.Module):
             return 0
         loss = 0
 
-        tgt = self.add_bos(tgt)
-        tgt = self.add_eos(tgt)
         src_embed = self.embedding(src)
         tgt_embed = self.embedding(tgt)
         src_embed_dropout = self.dropout(src_embed)
